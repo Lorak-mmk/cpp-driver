@@ -242,12 +242,12 @@ Cluster::Cluster(const ControlConnection::Ptr& connection, ClusterListener* list
     , hosts_(hosts)
     , local_dc_(local_dc)
     , supported_options_(supported_options)
-    , is_recording_events_(settings.disable_events_on_startup) {
+    , is_recording_events_(settings.disable_events_on_startup)
+    , self_ref(this) {
   static const auto optimized_msg = "===== Using optimized driver!!! =====\n";
   std::cout << optimized_msg;
   LOG_INFO(optimized_msg);
 
-  inc_ref();
   connection_->set_listener(this);
 
   if (settings_.local_port_range_lo_ && settings_.local_port_range_hi_) {
@@ -262,21 +262,21 @@ Cluster::Cluster(const ControlConnection::Ptr& connection, ClusterListener* list
   listener_->on_reconnect(this);
 }
 
-void Cluster::close() { event_loop_->add(new ClusterRunClose(Ptr(this))); }
+void Cluster::close() { event_loop_->add(new ClusterRunClose(this->shared_from_this())); }
 
 void Cluster::notify_host_up(const Address& address) {
-  event_loop_->add(new ClusterNotifyUp(Ptr(this), address));
+  event_loop_->add(new ClusterNotifyUp(this->shared_from_this(), address));
 }
 
 void Cluster::notify_host_down(const Address& address) {
-  event_loop_->add(new ClusterNotifyDown(Ptr(this), address));
+  event_loop_->add(new ClusterNotifyDown(this->shared_from_this(), address));
 }
 
-void Cluster::start_events() { event_loop_->add(new ClusterStartEvents(Ptr(this))); }
+void Cluster::start_events() { event_loop_->add(new ClusterStartEvents((this->shared_from_this()))); }
 
 void Cluster::start_monitor_reporting(const String& client_id, const String& session_id,
                                       const Config& config) {
-  event_loop_->add(new ClusterStartClientMonitor(Ptr(this), client_id, session_id, config));
+  event_loop_->add(new ClusterStartClientMonitor(this->shared_from_this(), client_id, session_id, config));
 }
 
 Metadata::SchemaSnapshot Cluster::schema_snapshot() { return metadata_.schema_snapshot(); }
@@ -489,7 +489,7 @@ void Cluster::handle_close() {
   }
   connection_.reset();
   listener_->on_close(this);
-  dec_ref();
+  self_ref.reset();
 }
 
 void Cluster::internal_notify_host_up(const Address& address) {
@@ -520,7 +520,7 @@ void Cluster::internal_notify_host_up(const Address& address) {
     return; // Ignore host
   }
 
-  if (!prepare_host(host, bind_callback(&Cluster::on_prepare_host_up, Cluster::Ptr(this)))) {
+  if (!prepare_host(host, bind_callback(&Cluster::on_prepare_host_up, this->weak_from_this()))) {
     notify_host_up_after_prepare(host);
   }
 }
@@ -613,7 +613,7 @@ void Cluster::notify_host_add(const Host::Ptr& host) {
     return; // Ignore host
   }
 
-  if (!prepare_host(host, bind_callback(&Cluster::on_prepare_host_add, Cluster::Ptr(this)))) {
+  if (!prepare_host(host, bind_callback(&Cluster::on_prepare_host_add, this->weak_from_this()))) {
     notify_host_add_after_prepare(host);
   }
 }

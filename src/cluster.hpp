@@ -238,10 +238,10 @@ struct ClusterSettings {
  * connection even if no hosts are available.
  */
 class Cluster
-    : public RefCounted<Cluster>
+    : public std::enable_shared_from_this<Cluster>
     , public ControlConnectionListener {
 public:
-  typedef SharedRefPtr<Cluster> Ptr;
+  typedef std::shared_ptr<Cluster> Ptr;
 
   /**
    * Constructor. Don't use directly.
@@ -457,6 +457,7 @@ private:
   Timer monitor_reporting_timer_;
   ScopedPtr<ReconnectionSchedule> reconnection_schedule_;
   ScopedPtr<ShardPortCalculator> shard_port_calculator_;
+  Cluster::Ptr self_ref;
 };
 
 }}} // namespace datastax::internal::core

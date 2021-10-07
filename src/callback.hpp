@@ -22,6 +22,7 @@
 #include "ref_counted.hpp"
 
 #include <new>
+#include <memory>
 #include <stddef.h>
 
 namespace datastax { namespace internal {
@@ -48,6 +49,14 @@ public:
     typedef MemberInvoker<F, T> MemberPtrInvoker;
     STATIC_ASSERT(sizeof(Storage) >= sizeof(MemberPtrInvoker));
     STATIC_ASSERT(ALIGN_OF(Storage) >= ALIGN_OF(MemberPtrInvoker));
+  }
+
+  template <class F, class T>
+  Callback(F func, std::weak_ptr<T> ptr)
+      : invoker_(new (&storage_) MemberWeakPtrInvoker<F, T>(func, ptr)) {
+    typedef MemberInvoker<F, T> MemberWeakPtrInvoker;
+    STATIC_ASSERT(sizeof(Storage) >= sizeof(MemberWeakPtrInvoker));
+    STATIC_ASSERT(ALIGN_OF(Storage) >= ALIGN_OF(MemberWeakPtrInvoker));
   }
 
   template <class F>
@@ -83,8 +92,8 @@ private:
   // - A vtable pointer (8 bytes).
   // - A member function pointer or a function pointer (this can be a fat
   //   pointer of up to 16 bytes).
-  // - A pointer/int data parameter (8 bytes).
-  typedef AlignedStorage<32, 8> Storage;
+  // - A pointer/int data parameter (8 bytes) (or a weak_ptr which seems to be 16 bytes big).
+  typedef AlignedStorage<40, 8> Storage;
 
   struct Invoker {
     virtual R invoke(const Arg& arg) const = 0;
@@ -117,6 +126,25 @@ private:
 
     F func;
     SharedRefPtr<T> ptr;
+  };
+
+  template <class F, class T>
+  struct MemberWeakPtrInvoker : public Invoker {
+    MemberWeakPtrInvoker(F func, const std::weak_ptr<T>& ptr)
+        : func(func)
+        , ptr(ptr) {}
+
+    R invoke(const Arg& arg) const {
+      std::shared_ptr<T> sptr = ptr.lock();
+      if (sptr) {
+        return (sptr.get()->*func)(arg);
+      }
+    }
+
+    Invoker* copy(Storage* storage) { return new (storage) MemberWeakPtrInvoker<F, T>(func, ptr); }
+
+    F func;
+    std::weak_ptr<T> ptr;
   };
 
   template <class F>
@@ -159,6 +187,16 @@ Callback<R, Arg> bind_callback(R (T::*func)(Arg), T* object) {
 
 template <class R, class Arg, class T>
 Callback<R, Arg> bind_callback(R (T::*func)(Arg), const SharedRefPtr<T>& ptr) {
+  return Callback<R, Arg>(func, ptr);
+}
+
+template <class R, class Arg, class T>
+Callback<R, Arg> bind_callback(R (T::*func)(Arg), const std::shared_ptr<T>& ptr) {
+  return Callback<R, Arg>(func, ptr);
+}
+
+template <class R, class Arg, class T>
+Callback<R, Arg> bind_callback(R (T::*func)(Arg), const std::weak_ptr<T>& ptr) {
   return Callback<R, Arg>(func, ptr);
 }
 
